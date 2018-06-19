@@ -1,0 +1,642 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset=utf-8>
+  <title>排期</title>
+  <script src="./paiqi/vue.js"></script>
+  <!-- 引入样式 -->
+  <link rel="stylesheet" href="./paiqi/elemeui/index.css">
+  <!-- 引入组件库 -->
+  <script src="./paiqi/elemeui/index.js"></script>
+  <script src="./paiqi/jquery.js"></script>
+  <script src="./paiqi/moment.min.js"></script>
+  <script src="./paiqi/jquery.ui.min.js"></script>
+  <script src="./paiqi/fullcalendar.min.js"></script>
+  <script src="./paiqi/scheduler.js"></script>
+  <script src="./paiqi/zh-cn.js"></script>
+  <link rel='stylesheet' href="./paiqi/fullcalendar.min.css" />
+  <link rel='stylesheet' href='./paiqi/scheduler.min.css' />
+  <!-- 存储服务 -->
+  <script src="https://cdn1.lncld.net/static/js/av-min-1.2.1.js"></script>
+  <style>
+  .menu {
+    position: absolute;
+    z-index: 2;
+  }
+
+  .menu-item {
+    border: 1px solid #ccc;
+    padding: 3px;
+    border-radius: 4px;
+    font-size: 14px;
+    background: #f5f5f5;
+    cursor: pointer;
+  }
+
+  .fc-sat,
+  .fc-sun {
+    background: #f7f6f6;
+  }
+</style>
+</head>
+
+<body>
+  <div id="app">
+    <el-row>
+      <el-col :span="12">
+        <el-form ref="form" style="width:430px;" size="mini" :model="form" label-width="80px">
+          <el-form-item label="事件名" prop="eventName">
+            <el-input v-model="form.eventName"></el-input>
+          </el-form-item>
+          <el-form-item label="时间" prop="eventRange">
+            <el-date-picker v-model="form.eventRange" type="daterange" value-format="yyyy-MM-dd" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期">
+            </el-date-picker>
+          </el-form-item>
+          <el-form-item label="人员" prop="userId">
+            <el-select v-model="form.userId">
+              <el-option v-for="item in resourceList" :key="item.id" :label="item.title" :value="item.id">
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button v-show="!editing" type="primary" @click="addEvent">添加</el-button>
+            <div v-show="editing">
+              <el-button type="primary" @click="save">保存</el-button>
+              <el-button type="primary" @click="cancel">取消</el-button>
+            </div>
+          </el-form-item>
+        </el-form>
+      </el-col>
+      <el-col :span="12">
+        <div style="width:400px;">
+          待定：
+          <div id="external-events">
+            <div class='fc-event' @click="editBacklog(item)" v-for="item in backLogList" :title="item.start.split(' ')[0]+'~'+item.end.split(' ')[0]" v-text="item.title" :e="JSON.stringify(item)"></div>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+    <div id="calendar"></div>
+    <div id="menu" class="menu" style="display: none;">
+      <div class="menu-item">删除</div>
+    </div>
+  </div>
+  <script>
+    /********** config-start *********/
+    var defaultResources = [];
+    var resourcesIds = [];
+
+    /********** config-end *********/
+
+    var createId = function() {
+      return (Math.random() * 1000 | 0) + (+new Date()) + '';
+    }
+
+    var getColor = function() {
+      var colorIndex = 0;
+      var colors = ["#ef5350", "#EC407A", "#AB47BC", "#7E57C2", "#5C6BC0", "#42A5F5", "#29B6F6", "#26C6DA", "#26A69A", "#66BB6A", "#9CCC65", "#D4E157", "#FFEE58", "#FFCA28", "#FFA726", "#FF7043", "#8D6E63", "#BDBDBD", "#78909C"];
+      return function() {
+        return colors[(colorIndex + 1) > colors.length ? colorIndex = 0 : colorIndex++];
+      }
+    }();
+
+    var deleteEventId = 0;
+    var deleteResourceId = 0;
+
+    //删除
+    document.oncontextmenu = function(e) {
+      var t = $(e.target);
+      var $eventElement = t.closest('[event-id]');
+      var $resourceElement = t.closest('[resource-obj-id]');
+      if ($eventElement.length || $resourceElement.length) {
+        deleteEventId = 0;
+        deleteResourceId = 0;
+        $('#menu').show().css({
+          left: e.clientX + 'px',
+          top: (e.clientY + document.documentElement.scrollTop) + 'px'
+        });
+
+        deleteEventId = $eventElement.attr('event-id') || 0;
+        deleteResourceId = $resourceElement.attr('resource-obj-id') || 0;
+        return false;
+      }
+    };
+    $(document.body).on('click', '.menu-item', function() {
+      $('#menu').hide();
+        // console.log(deleteEvent);
+        var delIndex = -1;
+
+        //删除事件
+        if (deleteEventId) {
+          for (var i = 0; i < events.length; i++) {
+            if (events[i].id == deleteEventId) {
+              events.splice(i, 1);
+              refetchEvents();
+              return;
+            }
+          }
+        }
+
+        //删除人员
+        if (deleteResourceId) {
+          for (var i = 0; i < resources.length; i++) {
+            if (resources[i].id == deleteResourceId) {
+
+              var hasEvent = events.filter(e => {
+                return e.resourceId == deleteResourceId;
+              });
+
+              if (hasEvent.length) {
+                var dates = hasEvent.map(e => {
+                  return e.start.split(' ')[0]
+                }).join(',');
+
+                if (confirm(`${dates}还有排期任务，确定全部删除吗？`) == false) {
+                  return
+                }
+                        //删除事件
+                        for (var j = 0; j < events.length; j++) {
+                          if (events[j].resourceId == deleteResourceId) {
+                            events.splice(j--, 1);
+                          }
+                        }
+                        refetchEvents();
+                      }
+                    //删除资源
+                    resources.splice(i, 1);
+                    refetchResources();
+
+                    return;
+                  }
+                }
+              }
+            });
+    $(document.body).on('click', function() { $('#menu').hide(); })
+
+
+    var resources, resourcesList, events, backLog;
+
+    $(function() {
+      var resPromise = getResources();
+      getEvents().then(function(res) {
+        var eventsPromise = res.events;
+        var backlogPromise = res.backlogs;
+        Promise.all([resPromise, eventsPromise, backlogPromise]).then(function(result) {
+
+          var [_res, _events, _backlog] = result;
+
+          resources = _res ? _res : defaultResources;
+          resourcesList = [{ id: 'backlog', title: '待定' }].concat(resources);
+          resources.forEach(e => {
+            e.eventColor = getColor();
+          });
+
+          events = _events || [];
+          backLog = _backlog || [];
+          initVue();
+          init();
+          getCurrentUserInfo();
+        });
+      })
+    });
+
+    // 添加leancloud数据存储服务
+    var { Query, User } = AV;
+    AV.init({
+      appId: 'your appid',
+      appKey: 'your appkey'
+    });
+    // localStorage.setItem('debug', 'leancloud*,LC*');
+
+    function initVue() {
+      vm = new Vue({
+        el: '#app',
+        data: {
+          resourceList: resourcesList,
+          backLogList: backLog,
+          form: {
+            id: '',
+            eventName: '',
+            eventRange: [],
+            userId: resourcesList[0].id
+          },
+          editing: false,
+          editingBacklog: false,
+          userId: '',
+          currentUser: {}
+        },
+        methods: {
+          addEvent: function() {
+            var _this = this;
+            var er = _this.form.eventRange;
+            if (this.form.eventName.trim() == '') {
+              return this.$message.error('请填写事件名');
+            }
+            if (er.length == 0 || (er[0] == '' || er[1] == '')) {
+              return this.$message.error('请填写开始时间和结束时间');
+            }
+            var event = {
+              cid: createId(),
+              title: this.form.eventName,
+              start: er[0] + ' 00:00:00',
+              end: er[1] + ' 23:59:59',
+            }
+            event = Object.assign(event, { resourceId: this.form.userId });
+            if (this.form.userId == 'backlog') {
+              this.backLogList.push(event);
+              refetchBacklogs();
+              refetchEvents(event);
+              return;
+            }
+            events.push(event);
+            refetchEvents(event);
+            this.$refs['form'].resetFields();
+          },
+          save: function() {
+            var we = events.find(e => {
+              return e.id == this.form.id
+            });
+
+            var bc = backLog.find(e => {
+              return e.id == this.form.id
+            });
+
+            var saveObj = we || bc;
+            var er = this.form.eventRange;
+            saveObj.title = this.form.eventName;
+            saveObj.start = er[0] + ' 00:00:00';
+            saveObj.end = er[1] + ' 23:59:59'
+            saveObj.resourceId = this.form.userId;
+            refetchEvents(event);
+            this.editing = false;
+            this.$refs['form'].resetFields();
+
+          },
+          cancel: function() {
+            this.editing = false;
+            this.editingBacklog = false;
+            this.$refs['form'].resetFields();
+          },
+          editBacklog: function(item) {
+            vm.form.id = item.id;
+            vm.form.eventName = item.title;
+            vm.form.eventRange = [item.start, item.end];
+            vm.form.userId = item.resourceId;
+            vm.editing = true;
+            vm.editingBacklog = true;
+          },
+
+          userRegister: function() {
+            var user = new AV.User();
+            user.setUsername('user');
+            user.setPassword('123');
+            user.signUp().then(function(loggedInUser) {}, function(error) {});
+          }
+        }
+      });
+    }
+    // vm.userLogin();
+    function init() { // dom ready
+      var cfg = {
+        resourceAreaWidth: 230,
+        editable: true,
+        droppable: true,
+        selectable: true,
+        selectHelper: true,
+        aspectRatio: 1.5,
+        defaultDate: moment(new Date()).format('YYYY-MM-DD'),
+        header: {
+          left: 'promptResource today prev,next',
+          center: 'title',
+          right: 'timelineMonth,oneMonth'
+        },
+        slotWidth: 100,
+        resourceAreaWidth: 90,
+        customButtons: {
+          promptResource: {
+            text: '增加',
+            click: function() {
+              var title = prompt('名称');
+              if (title) {
+                var n = {
+                  "title": title,
+                  "id": "_fc" + createId(),
+                  "eventClassName": [],
+                  "children": [],
+                  "eventColor": getColor()
+                };
+                resources.push(n);
+                refetchResources();
+                resourcesList.push(n);
+              }
+            }
+          }
+        },
+        defaultView: 'timelineMonth',
+        views: {
+          oneMonth: {
+                    //这里的oneMonth 和 timelineMonth一样
+                    type: 'timelineWeek',
+                    duration: { months: 12 },
+                    buttonText: '年'
+                  }
+                },
+
+                resourceLabelText: '人员',
+                resources: resources,
+                nextDayThreshold: "00:00:00",
+                resources: function(callback) {
+                  callback(resources);
+                },
+                resourceRender: function(resourceObj, labelTds, bodyTds) {
+                  labelTds.attr('resource-obj-id', resourceObj.id);
+                },
+                events: function(a, b, c, callback) {
+                  callback(events);
+                },
+            eventRender: function(event, element, view) { //当Event对象开始渲染时触发
+                // debugger;
+                // debugger;
+                element.attr('event-id', event.id);
+                element.attr('title', event.title);
+                element.attr('resource-id', event.resourceId);
+                element.find('.fc-time').hide() //不想显示里面的前缀
+                element.html(element.html());
+              },
+            select: function(start, end, jsEvent, view, resources) { //点击空白区域/选择区域内容触发
+              var title = prompt('事件名:');
+              var eventData;
+              if (title) {
+                eventData = {
+                  cid: createId(),
+                  title: title,
+                  start: moment(start).format('YYYY-MM-DD') + ' 00:00:00',
+                  end: moment(end).add(-1, 'day').format('YYYY-MM-DD') + ' 23:59:59',
+                  resourceId: resources.id
+                };
+                events.push(eventData);
+                refetchEvents(eventData)
+              }
+              $('#calendar').fullCalendar('unselect');
+            },
+            eventDrop: function(event, delta, revertFunc, jsEvent, ui, view) { //日程拖拽停止并且已经拖拽到其它位置了
+                // console.log(`从${event._id}拖到${event.resourceId} 拖了 ${delta._days} 天`);
+                var we = events.find(e => {
+                  return e.id == event.id
+                });
+                we.resourceId = event.resourceId;
+                we.start = moment(we.start).add(delta._days, 'day').format('YYYY-MM-DD' + ' 00:00:00');
+                we.end = moment(we.end).add(delta._days, 'day').format('YYYY-MM-DD' + ' 23:59:59');
+                refetchEvents();
+              },
+            eventResize: function(event, delta, revertFunc, jsEvent, ui, view, eventDefDateMutation) { //日程大小调整完成并已经执行更新时触发
+                // 当拖前面的时候， delta  会为空 , 此时会抛出 EventDefDateMutation 对象，所以看 eventDefDateMutation 对象就好了
+                // eventDefDateMutation.endDelta._days  //往后拖了几天
+                // eventDefDateMutation.startDelta._days//往前拖了几天
+                var we = events.find(e => {
+                  return e.id == event.id
+                });
+                if (eventDefDateMutation.startDelta && eventDefDateMutation.startDelta._days) {
+                  we.start = moment(we.start).add(eventDefDateMutation.startDelta._days, 'day').format('YYYY-MM-DD') + ' 00:00:00';
+                }
+                if (eventDefDateMutation.endDelta && eventDefDateMutation.endDelta._days) {
+                  we.end = moment(we.end).add(eventDefDateMutation.endDelta._days, 'day').format('YYYY-MM-DD') + ' 23:59:59';
+                }
+                refetchEvents();
+              },
+            eventClick: function(calEvent, jsEvent, view) { //日程区块，单击时触发
+              console.log("↓↓↓eventClick↓↓↓");
+              console.log(calEvent);
+                // console.log('Coordinates: ' + jsEvent.pageX + ',' + jsEvent.pageY);
+                // console.log('Current view: ' + view.name);
+                vm.form.id = calEvent.id;
+                vm.form.eventName = calEvent.title;
+                vm.form.eventRange = [calEvent.start.format('YYYY-MM-DD'), calEvent.end.format('YYYY-MM-DD')];
+                vm.form.userId = calEvent.resourceId;
+                vm.editing = true;
+                // calEvent.
+                // change the day's background color just for fun
+                // $(this).css('background-color', 'green');
+                // return false;  //return false可以阻止点击后续事件发生（比如event中的url跳转事件）
+              },
+            eventMouseover: function(calEvent, jsEvent, view) { //鼠标在日程区块上时触发
+                // $(this).css('background-color', '#ccc');
+              },
+            eventMouseout: function(calEvent, jsEvent, view) { //鼠标从日程区块离开时触发
+                // $(this).css('background-color', '');
+              },
+              drop: function(date, jsEvent, ui, resourceId) {
+                // 将待办事项拖进日程中，即将数据库中的该数据绑定到相应的人员下面
+                var eventData = JSON.parse(ui.helper.attr('e'));
+                eventData.resourceId = resourceId;
+                updateEvents(eventData).then(function(res){
+                  if(res.code === 100){
+                    events.push(eventData);
+                    //删掉拖进来的那个待定
+                    for (var i = 0; i < backLog.length; i++) {
+                      if (backLog[i].aid == eventData.aid) {
+                        backLog.splice(i, 1);
+                      }
+                    }
+                  }else{
+                    vm.$message.error('failed')
+                  }
+                })
+
+
+
+              }
+            };
+            $('#calendar').fullCalendar(cfg);
+          }
+
+    // readjust sizing after font load
+    $(window).on('load', function() {
+      $('#calendar').fullCalendar('render');
+    });
+
+    //刷新
+    function refetchEvents(data) {
+      $('#calendar').fullCalendar('refetchEvents');
+      saveData('events', data);
+    }
+
+    function refetchResources() {
+      $('#calendar').fullCalendar('refetchResources');
+      saveData('resources');
+
+    }
+
+    function refetchBacklogs() {
+        // $('#calendar').fullCalendar('refetchEvents');
+        saveData('backlogs');
+      }
+
+    //因为fc-event元素是后面加上的, 将待定，拖到日历中
+    $(document.body).on('mouseenter', '#external-events .fc-event', function() {
+
+      if ($(this).data('isbinded')) {
+        return;
+      }
+        // store data so the calendar knows to render an event upon drop
+        $(this).data('event', {
+            title: $.trim($(this).text()), // use the element's text as the event title
+            // stick: true // maintain when user navigates (see docs on the renderEvent method) stick如果为true，在从待定区域拖到面板里面的时候，会生成一个事件这个事件用不上，因为drop事件中会处理并根据你拖拽的dom上的属性来添加事件并重新渲染。
+          });
+
+        // make the event draggable using jQuery UI
+        $(this).draggable({
+          zIndex: 999,
+            revert: true, // will cause the event to go back to its
+            revertDuration: 0 //  original position after the drag
+          });
+        $(this).data('isbinded', true);
+      });
+
+    function getKey(k) {
+      return userId + '_' + k
+    }
+    //保存
+    function saveData(type, data) {
+      var _this = this;
+      switch (type) {
+        case 'resources':
+        var userRes = AV.Object.createWithoutData('_User', vm.userId);
+        userRes.set('resources', resources);
+        userRes.save();
+        break;
+        case 'events':
+        saveEvents(data);
+        break;
+
+      }
+    }
+
+    // 将对象保存到leancloud中
+    function saveEvents(data) {
+      var NewClass = AV.Object.extend('Contents');
+      var newClass = new NewClass();
+      for (var key in data) {
+        newClass.set(key, data[key]);
+      }
+      newClass.set('userId', vm.userId);
+      newClass.save().then(function(todo) {
+        // vm.$message.success('success')
+      }, function(error) {
+        console.error(error);
+      });
+    }
+
+    // 修改Contents
+    function updateEvents(data) {
+      return new Promise(function(resolve, reject) {
+        var content = AV.Object.createWithoutData('Contents', data.aid);
+        content.set('resourceId', data.resourceId);
+        content.save().then(function(todo) {
+          resolve({
+            code: 100
+          })
+        }, function(error) {
+          reject({
+            code: 101
+          });
+        });
+      })
+    }
+
+    // 获取当前用户信息
+    function getCurrentUserInfo() {
+      var currentUser = AV.User.current();
+      if (currentUser) {
+        vm.currentUser = currentUser;
+        vm.userId = currentUser.id;
+      } else {
+        userLogin();
+      }
+    }
+
+    function userLogin() {
+      AV.User.logIn('user', '123').then(function(loggedInUser) {
+        getCurrentUserInfo();
+      }, function(error) {});
+    }
+    //获取人员
+    function getResources() {
+      var currentUser = AV.User.current();
+      if (currentUser) {
+        return new Promise(function(resolve, reject) {
+          var query = new AV.Query('_User');
+          query.get(currentUser.id).then(function(user) {
+            resolve(user._serverData.resources || []);
+            user._serverData.resources.forEach(function(resource) {
+              resourcesIds.push(resource.id)
+            })
+          }, function(error) {
+            reject(error);
+          });
+        })
+      } else {
+        getCurrentUserInfo();
+      }
+    }
+    //获取项目
+    function getEvents() {
+      var currentUser = AV.User.current();
+      if (currentUser) {
+        return new Promise(function(resolve, reject) {
+          var query = new AV.Query('Contents');
+          query.equalTo('userId', currentUser.id);
+          query.find().then(function(res) {
+            var results = [];
+            var backlogs = [];
+            res.forEach(function(rel) {
+              var data = {};
+              data = rel._serverData;
+              data.aid = rel.id;
+              if (rel._serverData.resourceId === 'backlog') {
+                backlogs.push(data)
+              } else {
+                results.push(data)
+              }
+            })
+            resolve({
+              events: results,
+              backlogs: backlogs
+            });
+          }, function(err) {
+            reject({
+              events: [],
+              backlogs: []
+            })
+          });
+        })
+      } else {
+        getCurrentUserInfo();
+      }
+    }
+    // //获取backlog
+    // function getBacklogs() {
+    //   var currentUser = AV.User.current();
+    //   if (currentUser) {
+    //     return new Promise(function(resolve, reject) {
+    //       var query = new AV.Query('Contents');
+    //       query.equalTo('resourceId', 'backlog');
+    //       query.find().then(function(res) {
+    //         var results = [];
+    //         res.forEach(function(rel) {
+    //           results.push(rel._serverData)
+    //         })
+    //         resolve(results || []);
+    //       }, function(err) {
+    //         reject(err)
+    //       });
+    //     })
+    //   } else {
+    //     getCurrentUserInfo();
+    //   }
+    // }
+  </script>
+</body>
+
+</html>
