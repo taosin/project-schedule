@@ -15,6 +15,7 @@
   <script src="./paiqi/fullcalendar.min.js"></script>
   <script src="./paiqi/scheduler.js"></script>
   <script src="./paiqi/zh-cn.js"></script>
+  <script src="./paiqi/config.js"></script>
   <link rel='stylesheet' href="./paiqi/fullcalendar.min.css" />
   <link rel='stylesheet' href='./paiqi/scheduler.min.css' />
   <!-- 存储服务 -->
@@ -203,11 +204,7 @@
 
     // 添加leancloud数据存储服务
     var { Query, User } = AV;
-    AV.init({
-      appId: 'your appid',
-      appKey: 'your appkey'
-    });
-    // localStorage.setItem('debug', 'leancloud*,LC*');
+    AV.init(config.leancloud);
 
     function initVue() {
       vm = new Vue({
@@ -289,15 +286,14 @@
 
           userRegister: function() {
             var user = new AV.User();
-            user.setUsername('user');
+            user.setUsername('taoxin');
             user.setPassword('123');
             user.signUp().then(function(loggedInUser) {}, function(error) {});
           }
         }
       });
     }
-    // vm.userLogin();
-    function init() { // dom ready
+    function init() {
       var cfg = {
         resourceAreaWidth: 230,
         editable: true,
@@ -336,28 +332,26 @@
         defaultView: 'timelineMonth',
         views: {
           oneMonth: {
-                    //这里的oneMonth 和 timelineMonth一样
-                    type: 'timelineWeek',
-                    duration: { months: 12 },
-                    buttonText: '年'
-                  }
-                },
+            type: 'timelineWeek',
+            duration: { months: 12 },
+            buttonText: '年'
+          }
+        },
 
-                resourceLabelText: '人员',
-                resources: resources,
-                nextDayThreshold: "00:00:00",
-                resources: function(callback) {
-                  callback(resources);
-                },
-                resourceRender: function(resourceObj, labelTds, bodyTds) {
-                  labelTds.attr('resource-obj-id', resourceObj.id);
-                },
-                events: function(a, b, c, callback) {
-                  callback(events);
-                },
-            eventRender: function(event, element, view) { //当Event对象开始渲染时触发
-                // debugger;
-                // debugger;
+        resourceLabelText: '人员',
+        resources: resources,
+        nextDayThreshold: "00:00:00",
+        resources: function(callback) {
+          callback(resources);
+        },
+        resourceRender: function(resourceObj, labelTds, bodyTds) {
+          labelTds.attr('resource-obj-id', resourceObj.id);
+        },
+        events: function(a, b, c, callback) {
+          callback(events);
+        },
+        eventRender: function(event, element, view) {
+                //当Event对象开始渲染时触发
                 element.attr('event-id', event.id);
                 element.attr('title', event.title);
                 element.attr('resource-id', event.resourceId);
@@ -430,19 +424,19 @@
                 // 将待办事项拖进日程中，即将数据库中的该数据绑定到相应的人员下面
                 var eventData = JSON.parse(ui.helper.attr('e'));
                 eventData.resourceId = resourceId;
-                updateEvents(eventData).then(function(res){
-                  if(res.code === 100){
+                updateEvents(eventData).then(function(res) {
+                  if (res.code === 100) {
                     events.push(eventData);
-                    //删掉拖进来的那个待定
-                    for (var i = 0; i < backLog.length; i++) {
-                      if (backLog[i].aid == eventData.aid) {
-                        backLog.splice(i, 1);
+                        //删掉拖进来的那个待定
+                        for (var i = 0; i < backLog.length; i++) {
+                          if (backLog[i].aid == eventData.aid) {
+                            backLog.splice(i, 1);
+                          }
+                        }
+                      } else {
+                        vm.$message.error('failed')
                       }
-                    }
-                  }else{
-                    vm.$message.error('failed')
-                  }
-                })
+                    })
 
 
 
@@ -522,10 +516,10 @@
       }
       newClass.set('userId', vm.userId);
       newClass.save().then(function(todo) {
-        // vm.$message.success('success')
-      }, function(error) {
-        console.error(error);
-      });
+            // vm.$message.success('success')
+          }, function(error) {
+            console.error(error);
+          });
     }
 
     // 修改Contents
@@ -557,7 +551,7 @@
     }
 
     function userLogin() {
-      AV.User.logIn('user', '123').then(function(loggedInUser) {
+      AV.User.logIn('taoxin', '123').then(function(loggedInUser) {
         getCurrentUserInfo();
       }, function(error) {});
     }
